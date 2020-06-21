@@ -18,7 +18,6 @@ __all__ = [
     "ROI_MASK_HEAD_REGISTRY",
 ]
 
-
 ROI_MASK_HEAD_REGISTRY = Registry("ROI_MASK_HEAD")
 ROI_MASK_HEAD_REGISTRY.__doc__ = """
 Registry for mask heads, which predicts instance masks given
@@ -49,7 +48,8 @@ def mask_rcnn_loss(pred_mask_logits, instances, vis_period=0):
     cls_agnostic_mask = pred_mask_logits.size(1) == 1
     total_num_masks = pred_mask_logits.size(0)
     mask_side_len = pred_mask_logits.size(2)
-    assert pred_mask_logits.size(2) == pred_mask_logits.size(3), "Mask prediction must be square!"
+    assert pred_mask_logits.size(2) == pred_mask_logits.size(
+        3), "Mask prediction must be square!"
 
     gt_classes = []
     gt_masks = []
@@ -57,12 +57,13 @@ def mask_rcnn_loss(pred_mask_logits, instances, vis_period=0):
         if len(instances_per_image) == 0:
             continue
         if not cls_agnostic_mask:
-            gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
+            gt_classes_per_image = instances_per_image.gt_classes.to(
+                dtype=torch.int64)
             gt_classes.append(gt_classes_per_image)
 
         gt_masks_per_image = instances_per_image.gt_masks.crop_and_resize(
-            instances_per_image.proposal_boxes.tensor, mask_side_len
-        ).to(device=pred_mask_logits.device)
+            instances_per_image.proposal_boxes.tensor,
+            mask_side_len).to(device=pred_mask_logits.device)
         # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
         gt_masks.append(gt_masks_per_image)
 
@@ -87,12 +88,13 @@ def mask_rcnn_loss(pred_mask_logits, instances, vis_period=0):
 
     # Log the training accuracy (using gt classes and 0.5 threshold)
     mask_incorrect = (pred_mask_logits > 0.0) != gt_masks_bool
-    mask_accuracy = 1 - (mask_incorrect.sum().item() / max(mask_incorrect.numel(), 1.0))
+    mask_accuracy = 1 - (mask_incorrect.sum().item() /
+                         max(mask_incorrect.numel(), 1.0))
     num_positive = gt_masks_bool.sum().item()
     false_positive = (mask_incorrect & ~gt_masks_bool).sum().item() / max(
-        gt_masks_bool.numel() - num_positive, 1.0
-    )
-    false_negative = (mask_incorrect & gt_masks_bool).sum().item() / max(num_positive, 1.0)
+        gt_masks_bool.numel() - num_positive, 1.0)
+    false_negative = (mask_incorrect & gt_masks_bool).sum().item() / max(
+        num_positive, 1.0)
 
     storage = get_event_storage()
     storage.put_scalar("mask_rcnn/accuracy", mask_accuracy)
@@ -106,7 +108,9 @@ def mask_rcnn_loss(pred_mask_logits, instances, vis_period=0):
             vis_mask = torch.stack([vis_mask] * 3, axis=0)
             storage.put_image(name + f" ({idx})", vis_mask)
 
-    mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
+    mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits,
+                                                   gt_masks,
+                                                   reduction="mean")
     return mask_loss
 
 
@@ -134,6 +138,8 @@ def mask_rcnn_inference(pred_mask_logits, pred_instances):
     """
     cls_agnostic_mask = pred_mask_logits.size(1) == 1
 
+    # TODO Paul
+    cls_agnostic_mask = True
     if cls_agnostic_mask:
         mask_probs_pred = pred_mask_logits.sigmoid()
     else:
@@ -141,7 +147,8 @@ def mask_rcnn_inference(pred_mask_logits, pred_instances):
         num_masks = pred_mask_logits.shape[0]
         class_pred = cat([i.pred_classes for i in pred_instances])
         indices = torch.arange(num_masks, device=class_pred.device)
-        mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
+        mask_probs_pred = pred_mask_logits[indices,
+                                           class_pred][:, None].sigmoid()
     # mask_probs_pred.shape: (B, 1, Hmask, Wmask)
 
     num_boxes_per_image = [len(i) for i in pred_instances]
@@ -155,7 +162,6 @@ class BaseMaskRCNNHead(nn.Module):
     """
     Implement the basic Mask R-CNN losses and inference logic described in :paper:`Mask R-CNN`
     """
-
     @configurable
     def __init__(self, *, vis_period=0):
         """
@@ -205,9 +211,14 @@ class MaskRCNNConvUpsampleHead(BaseMaskRCNNHead):
     A mask head with several conv layers, plus an upsample layer (with `ConvTranspose2d`).
     Predictions are made with a final 1x1 conv layer.
     """
-
     @configurable
-    def __init__(self, input_shape: ShapeSpec, *, num_classes, conv_dims, conv_norm="", **kwargs):
+    def __init__(self,
+                 input_shape: ShapeSpec,
+                 *,
+                 num_classes,
+                 conv_dims,
+                 conv_norm="",
+                 **kwargs):
         """
         NOTE: this interface is experimental.
 
@@ -240,12 +251,18 @@ class MaskRCNNConvUpsampleHead(BaseMaskRCNNHead):
             self.conv_norm_relus.append(conv)
             cur_channels = conv_dim
 
-        self.deconv = ConvTranspose2d(
-            cur_channels, conv_dims[-1], kernel_size=2, stride=2, padding=0
-        )
+        self.deconv = ConvTranspose2d(cur_channels,
+                                      conv_dims[-1],
+                                      kernel_size=2,
+                                      stride=2,
+                                      padding=0)
         cur_channels = conv_dims[-1]
 
-        self.predictor = Conv2d(cur_channels, num_classes, kernel_size=1, stride=1, padding=0)
+        self.predictor = Conv2d(cur_channels,
+                                num_classes,
+                                kernel_size=1,
+                                stride=1,
+                                padding=0)
 
         for layer in self.conv_norm_relus + [self.deconv]:
             weight_init.c2_msra_fill(layer)

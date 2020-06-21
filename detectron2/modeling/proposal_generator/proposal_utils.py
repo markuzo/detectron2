@@ -57,9 +57,8 @@ def find_top_rpn_proposals(
     topk_proposals = []
     level_ids = []  # #lvl Tensor, each of shape (topk,)
     batch_idx = torch.arange(num_images, device=device)
-    for level_id, proposals_i, logits_i in zip(
-        itertools.count(), proposals, pred_objectness_logits
-    ):
+    for level_id, proposals_i, logits_i in zip(itertools.count(), proposals,
+                                               pred_objectness_logits):
         Hi_Wi_A = logits_i.shape[1]
         num_proposals_i = min(pre_nms_topk, Hi_Wi_A)
 
@@ -70,11 +69,16 @@ def find_top_rpn_proposals(
         topk_idx = idx[batch_idx, :num_proposals_i]
 
         # each is N x topk
-        topk_proposals_i = proposals_i[batch_idx[:, None], topk_idx]  # N x topk x 4
+        topk_proposals_i = proposals_i[batch_idx[:, None],
+                                       topk_idx]  # N x topk x 4
 
         topk_proposals.append(topk_proposals_i)
         topk_scores.append(topk_scores_i)
-        level_ids.append(torch.full((num_proposals_i,), level_id, dtype=torch.int64, device=device))
+        level_ids.append(
+            torch.full((num_proposals_i, ),
+                       level_id,
+                       dtype=torch.int64,
+                       device=device))
 
     # 2. Concat all levels together
     topk_scores = cat(topk_scores, dim=1)
@@ -88,7 +92,8 @@ def find_top_rpn_proposals(
         scores_per_img = topk_scores[n]
         lvl = level_ids
 
-        valid_mask = torch.isfinite(boxes.tensor).all(dim=1) & torch.isfinite(scores_per_img)
+        valid_mask = torch.isfinite(
+            boxes.tensor).all(dim=1) & torch.isfinite(scores_per_img)
         if not valid_mask.all():
             if training:
                 raise FloatingPointError(
@@ -99,10 +104,11 @@ def find_top_rpn_proposals(
             lvl = lvl[valid_mask]
         boxes.clip(image_size)
 
-        # filter empty boxes
+        # filter small boxes (empty by default)
         keep = boxes.nonempty(threshold=min_box_size)
         if keep.sum().item() != len(boxes):
-            boxes, scores_per_img, lvl = boxes[keep], scores_per_img[keep], lvl[keep]
+            boxes, scores_per_img, lvl = boxes[keep], scores_per_img[
+                keep], lvl[keep]
 
         keep = batched_nms(boxes.tensor, scores_per_img, lvl, nms_thresh)
         # In Detectron1, there was different behavior during training vs. testing.
