@@ -15,6 +15,7 @@ from detectron2.utils.events import get_event_storage
 __all__ = ["fast_rcnn_inference", "FastRCNNOutputLayers"]
 
 GENERIC_ID = 80
+OBJECTNESS_THRESHOLD = 6.5
 
 logger = logging.getLogger(__name__)
 """
@@ -138,41 +139,37 @@ def fast_rcnn_inference_single_image(boxes, scores, proposals, image_shape,
     obj_boxes = proposals.proposal_boxes.tensor
 
     # Filter by objectness threshold
-    filter_object_mask = objectness > 3.61  # TODO Hyperparameter
+    filter_object_mask = objectness > OBJECTNESS_THRESHOLD
 
+    # Add detected classes to boxes and scores
     filter_obj_inds = filter_object_mask.nonzero()
     obj_boxes = obj_boxes[filter_obj_inds[:, 0]]
-    objectness = objectness[filter_object_mask]
+    generic_boxes = torch.cat((class_boxes, obj_boxes), 0)
 
-    # Apply NMS, per generic object
-    keep_object = batched_nms(obj_boxes, objectness, filter_obj_inds[:, 1],
-                              nms_thresh)
+    objectness = objectness[filter_object_mask]
+    # Inflate classes scores, such that NMS keeps the classes
+    # not the generic object labels.
+    generic_scores = torch.cat((scores * 1000, objectness), 0)
+
+    generic_inds = torch.cat((filter_inds, filter_obj_inds), 0)
+    # Set all indexes to be the generic object index, such that NMS
+    # treats everything as one class
+    generic_inds[:, 1] = GENERIC_ID
+
+    # Apply NMS, per generic objects and detected classes
+    keep_object = batched_nms(generic_boxes, generic_scores,
+                              generic_inds[:, 1], nms_thresh)
+
+    # Keep top detections - detected classes have priority
     if topk_per_image >= 0:
         keep_object = keep_object[:topk_per_image]
 
-    obj_boxes, objectness, filter_obj_inds = obj_boxes[
-        keep_object], objectness[keep_object], filter_obj_inds[keep_object]
+    out_boxes, out_scores, out_ids = generic_boxes[
+        keep_object], generic_scores[keep_object], generic_inds[keep_object]
 
-    # Set class labels for objects that weren't classified
-    # objects_not_classified = torch.from_numpy(
-    #     np.setdiff1d(keep_object.numpy(), keep_class.numpy()))
-    # # TODO set generic object class
-
-    filter_obj_inds[:, 1] = GENERIC_ID
-
-    # keep = torch.cat((keep_class, keep_object), 0).unique()
-    # keep = keep_class
-
-    out_boxes = torch.cat((class_boxes, obj_boxes), 0)
-    out_scores = torch.cat((scores * 1000, objectness), 0)
-    out_ids = torch.cat((filter_inds, filter_obj_inds), 0)
-
-    keep_out = batched_nms(out_boxes, out_scores, out_ids[:, 1], nms_thresh)
-
-    # Real scores
-    out_scores = torch.cat((scores, objectness), 0)
-    out_boxes, out_scores, out_ids = out_boxes[keep_out], out_scores[
-        keep_out], out_ids[keep_out]
+    # Reset class index for detected classes
+    out_ids[0:filter_inds.shape[0]] = filter_inds
+    out_scores[0:scores.shape[0]] = scores
 
     result = Instances(image_shape)
     result.pred_boxes = Boxes(out_boxes)
