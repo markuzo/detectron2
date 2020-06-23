@@ -11,10 +11,25 @@ from detectron2.config import get_cfg
 from detectron2.data.detection_utils import read_image
 from detectron2.utils.logger import setup_logger
 
+from detectron2.data import DatasetCatalog, MetadataCatalog
+
 from predictor import VisualizationDemo
 
 # constants
 WINDOW_NAME = "COCO detections"
+
+classes = [
+    'cartofi_aurii_rozmarin', 'cartofi_oregano', 'cartofi_piure',
+    'cartofi_prajiti', 'cartofi_wedges', 'cascaval_pane', 'chifle',
+    'ciorba_a_la_grec_pui', 'ciorba_burta', 'ciorba_legume',
+    'ciorba_perisoare', 'ciorba_peste', 'cus_cus', 'fasole_verde_sote',
+    'lasagna', 'legume_la_cuptor', 'legume_primavera', 'mamaliga', 'mici',
+    'mix_legume', 'orez', 'orez_salbatic', 'piept_pui_grill',
+    'pulpe_pui_intregi_la_cuptor', 'salata_varza', 'snitel_curcan',
+    'snitel_pui', 'supa_pui_taitei', 'tigaie_picanta', 'oare_ce_am_ratat'
+]
+
+TEST_DATASET_NAME = 'cbc_test'
 
 
 def setup_cfg(args):
@@ -26,6 +41,9 @@ def setup_cfg(args):
     cfg.MODEL.RETINANET.SCORE_THRESH_TEST = args.confidence_threshold
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.confidence_threshold
     cfg.MODEL.PANOPTIC_FPN.COMBINE.INSTANCES_CONFIDENCE_THRESH = args.confidence_threshold
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(classes)
+    cfg.DATASETS.TEST = [TEST_DATASET_NAME]
+
     cfg.freeze()
     return cfg
 
@@ -81,6 +99,12 @@ if __name__ == "__main__":
     cfg = setup_cfg(args)
 
     demo = VisualizationDemo(cfg)
+
+    # Put our classes in a mock dataset
+    DatasetCatalog.register(TEST_DATASET_NAME, print)
+    MetadataCatalog.get(TEST_DATASET_NAME).set(thing_classes=classes,
+                                               dirname='',
+                                               split='test')
 
     if args.input:
         if len(args.input) == 1:
