@@ -14,8 +14,9 @@ from detectron2.utils.events import get_event_storage
 
 __all__ = ["fast_rcnn_inference", "FastRCNNOutputLayers"]
 
-GENERIC_ID = 80
+GENERIC_ID = 30
 OBJECTNESS_THRESHOLD = 6.5
+NMS_IOU_GENERIC_THRESH = 0.2
 
 logger = logging.getLogger(__name__)
 """
@@ -102,7 +103,7 @@ def fast_rcnn_inference_single_image(boxes, scores, proposals, image_shape,
         boxes = boxes[valid_mask]
         scores = scores[valid_mask]
 
-    scores = scores[:, :-1]
+    class_scores = scores[:, :-1]
     num_bbox_reg_classes = boxes.shape[1] // 4
 
     # Convert to Boxes to use the `clip` function ...
@@ -111,25 +112,25 @@ def fast_rcnn_inference_single_image(boxes, scores, proposals, image_shape,
     boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
 
     # Filter results based on detection scores
-    filter_mask = scores > score_thresh  # R x K
+    filter_mask = class_scores > score_thresh  # R x K
 
     # R' x 2. First column contains indices of the R predictions;
     # Second column contains indices of classes.
-    filter_inds = filter_mask.nonzero()
+    class_inds = filter_mask.nonzero()
     if num_bbox_reg_classes == 1:
-        class_boxes = boxes[filter_inds[:, 0], 0]
+        class_boxes = boxes[class_inds[:, 0], 0]
     else:
         class_boxes = boxes[filter_mask]
-    scores = scores[filter_mask]
+    class_scores = class_scores[filter_mask]
 
     # Apply per-class NMS
-    keep_class = batched_nms(class_boxes, scores, filter_inds[:, 1],
+    keep_class = batched_nms(class_boxes, class_scores, class_inds[:, 1],
                              nms_thresh)
     if topk_per_image >= 0:
         keep_class = keep_class[:topk_per_image]
 
-    class_boxes, scores, filter_inds = class_boxes[keep_class], scores[
-        keep_class], filter_inds[keep_class]
+    class_boxes, class_scores, class_inds = class_boxes[
+        keep_class], class_scores[keep_class], class_inds[keep_class]
 
     #####
     # Per object
@@ -149,27 +150,31 @@ def fast_rcnn_inference_single_image(boxes, scores, proposals, image_shape,
     objectness = objectness[filter_object_mask]
     # Inflate classes scores, such that NMS keeps the classes
     # not the generic object labels.
-    generic_scores = torch.cat((scores * 1000, objectness), 0)
+    generic_scores = torch.cat((class_scores * 1000, objectness), 0)
 
-    generic_inds = torch.cat((filter_inds, filter_obj_inds), 0)
+    generic_inds = torch.cat((class_inds, filter_obj_inds), 0)
     # Set all indexes to be the generic object index, such that NMS
     # treats everything as one class
     generic_inds[:, 1] = GENERIC_ID
 
     # Apply NMS, per generic objects and detected classes
     keep_object = batched_nms(generic_boxes, generic_scores,
-                              generic_inds[:, 1], nms_thresh)
+                              generic_inds[:, 1], NMS_IOU_GENERIC_THRESH)
 
     # Keep top detections - detected classes have priority
     if topk_per_image >= 0:
         keep_object = keep_object[:topk_per_image]
 
-    out_boxes, out_scores, out_ids = generic_boxes[
+    # Don't keep indices already in class list
+    keep_object = torch.LongTensor(
+        [k for k in keep_object if generic_inds[k][0] not in class_inds[:, 0]])
+
+    generic_boxes, generic_scores, generic_inds = generic_boxes[
         keep_object], generic_scores[keep_object], generic_inds[keep_object]
 
-    # Reset class index for detected classes
-    out_ids[0:filter_inds.shape[0]] = filter_inds
-    out_scores[0:scores.shape[0]] = scores
+    out_boxes = torch.cat((class_boxes, generic_boxes), 0)
+    out_scores = torch.cat((class_scores, generic_scores), 0)
+    out_ids = torch.cat((class_inds, generic_inds), 0)
 
     result = Instances(image_shape)
     result.pred_boxes = Boxes(out_boxes)
